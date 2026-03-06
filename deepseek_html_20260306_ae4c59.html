@@ -1,0 +1,2111 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkyLedger - Pengelolaan Keuangan Pribadi</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <!-- CryptoJS untuk hashing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <!-- html2canvas (tidak dipakai) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- QR Code Generator -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+    <!-- jsQR untuk scan -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.min.js"></script>
+    <!-- BWIP-JS (tidak dipakai) -->
+    <script src="https://cdn.jsdelivr.net/npm/bwip-js@4.4.0/dist/bwip-js-min.js"></script>
+    <style>
+        body {
+            background: 
+                radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.7) 0%, transparent 30%),
+                radial-gradient(circle at 80% 70%, rgba(135, 206, 235, 0.3) 0%, transparent 40%),
+                linear-gradient(145deg, #b8e1fc 0%, #d0f0fd 100%);
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        }
+        .card { background: white; border-radius: 1.5rem; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(10px);
+            border-radius: 2rem;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+        .btn-primary { background-color: #1e3a8a; color: white; padding: 0.6rem 1.2rem; border-radius: 0.75rem; font-weight: 500; transition: all 0.2s; }
+        .btn-primary:hover { background-color: #1e40af; transform: translateY(-1px); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+        .btn-secondary { background-color: #f1f5f9; color: #1e293b; padding: 0.6rem 1.2rem; border-radius: 0.75rem; font-weight: 500; }
+        .btn-secondary:hover { background-color: #e2e8f0; }
+        .btn-success { background-color: #10b981; color: white; padding: 0.6rem 1.2rem; border-radius: 0.75rem; font-weight: 500; }
+        .btn-success:hover { background-color: #059669; }
+        .divider { border-top: 1px dashed #cbd5e1; margin: 1rem 0; }
+        .receipt { background: white; border-radius: 1.5rem; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); max-width: 420px; margin: 0 auto; }
+        .tab-active { background-color: #1e3a8a; color: white; }
+        #video { width: 100%; max-width: 400px; border-radius: 1rem; }
+        .logo-gafika {
+            background: linear-gradient(135deg, #10b981, #047857);
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 1rem;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+        }
+        .logo-gafika i {
+            font-size: 2.5rem;
+            color: white;
+        }
+        .barcode-canvas {
+            width: 100%;
+            max-width: 350px;
+            margin: 1rem auto;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <!-- React & ReactDOM -->
+    <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.development.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.development.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.21.4/babel.min.js"></script>
+
+    <script type="text/babel">
+        const { useState, useReducer, useEffect, useRef } = React;
+
+        // ==================== KONFIGURASI LOGIN ====================
+        const VALID_USERNAME = "Novalaldi571";
+        const VALID_PASSWORD_HASH = CryptoJS.SHA256("Novalaldi571").toString();
+
+        // ==================== HELPER FUNCTIONS ====================
+        const generateId = () => Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+        const generateReferensi = () => 'REF' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 5).toUpperCase();
+        const formatCurrency = (num) => 'IDR ' + new Intl.NumberFormat('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(num);
+        const formatDate = (isoString) => {
+            return new Date(isoString).toLocaleString('id-ID', { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        };
+        const formatDateOnly = (dateString) => {
+            return new Date(dateString).toLocaleDateString('id-ID', { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+            });
+        };
+        const formatDateSmart = (dateInput) => {
+            if (!dateInput) return '-';
+            if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+                return formatDateOnly(dateInput);
+            }
+            return formatDate(dateInput);
+        };
+        // Format for transaction list: "dd MMM yyyy · HH:mm"
+        const formatTransactionDate = (dateInput) => {
+            if (!dateInput) return '';
+            const d = new Date(dateInput);
+            return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + ' · ' + 
+                   d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+        };
+
+        // ==================== REDUCER DATA ====================
+        const initialState = { 
+            orangList: [],
+            transaksiList: [] 
+        };
+
+        function dataReducer(state, action) {
+            switch (action.type) {
+                case 'INIT': {
+                    const payload = action.payload;
+                    if (Array.isArray(payload)) {
+                        return {
+                            orangList: payload,
+                            transaksiList: []
+                        };
+                    }
+                    return {
+                        orangList: payload.orangList || [],
+                        transaksiList: payload.transaksiList || []
+                    };
+                }
+
+                case 'TAMBAH_ORANG': {
+                    const orangBaru = {
+                        id: generateId(),
+                        nama: action.payload.nama,
+                        hutang: []
+                    };
+                    return { ...state, orangList: [...state.orangList, orangBaru] };
+                }
+
+                case 'TAMBAH_ORANG_DARI_SCAN': {
+                    const { id, nama, hutang } = action.payload;
+                    const orangBaru = {
+                        id: id,
+                        nama,
+                        hutang: hutang.map(h => ({
+                            ...h,
+                            idHutang: generateId(),
+                            cicilan: h.cicilan.map(c => ({
+                                ...c,
+                                idTransaksi: generateId()
+                            }))
+                        }))
+                    };
+                    return { ...state, orangList: [...state.orangList, orangBaru] };
+                }
+
+                case 'EDIT_NAMA_ORANG': {
+                    const { orangId, namaBaru } = action.payload;
+                    const orangIndex = state.orangList.findIndex(o => o.id === orangId);
+                    if (orangIndex === -1) return state;
+                    const updatedOrang = { ...state.orangList[orangIndex], nama: namaBaru };
+                    const newOrangList = [...state.orangList];
+                    newOrangList[orangIndex] = updatedOrang;
+                    return { ...state, orangList: newOrangList };
+                }
+
+                case 'HAPUS_ORANG': {
+                    const { orangId } = action.payload;
+                    return { ...state, orangList: state.orangList.filter(o => o.id !== orangId) };
+                }
+
+                case 'TAMBAH_HUTANG': {
+                    const { orangId, totalHutang, tanggal, deskripsi } = action.payload;
+                    const orangIndex = state.orangList.findIndex(o => o.id === orangId);
+                    if (orangIndex === -1) return state;
+
+                    const hutangBaru = {
+                        idHutang: generateId(),
+                        totalHutang,
+                        tanggal,
+                        deskripsi,
+                        cicilan: []
+                    };
+
+                    const updatedOrang = { ...state.orangList[orangIndex] };
+                    updatedOrang.hutang = [...updatedOrang.hutang, hutangBaru];
+
+                    const newOrangList = [...state.orangList];
+                    newOrangList[orangIndex] = updatedOrang;
+                    return { ...state, orangList: newOrangList };
+                }
+
+                case 'EDIT_HUTANG': {
+                    const { orangId, hutangId, totalHutangBaru, deskripsiBaru } = action.payload;
+                    const orangIndex = state.orangList.findIndex(o => o.id === orangId);
+                    if (orangIndex === -1) return state;
+
+                    const orang = state.orangList[orangIndex];
+                    const hutangIndex = orang.hutang.findIndex(h => h.idHutang === hutangId);
+                    if (hutangIndex === -1) return state;
+
+                    const hutang = orang.hutang[hutangIndex];
+                    const totalCicilan = hutang.cicilan.reduce((sum, c) => sum + c.jumlah, 0);
+                    if (totalHutangBaru < totalCicilan) {
+                        alert('Total hutang baru tidak boleh kurang dari total cicilan yang sudah dibayar!');
+                        return state;
+                    }
+
+                    const updatedHutang = { ...hutang, totalHutang: totalHutangBaru, deskripsi: deskripsiBaru };
+                    const updatedOrang = { ...orang };
+                    updatedOrang.hutang = [...orang.hutang];
+                    updatedOrang.hutang[hutangIndex] = updatedHutang;
+
+                    const newOrangList = [...state.orangList];
+                    newOrangList[orangIndex] = updatedOrang;
+                    return { ...state, orangList: newOrangList };
+                }
+
+                case 'HAPUS_HUTANG': {
+                    const { orangId, hutangId } = action.payload;
+                    const orangIndex = state.orangList.findIndex(o => o.id === orangId);
+                    if (orangIndex === -1) return state;
+
+                    const orang = state.orangList[orangIndex];
+                    const updatedHutang = orang.hutang.filter(h => h.idHutang !== hutangId);
+                    const updatedOrang = { ...orang, hutang: updatedHutang };
+                    const newOrangList = [...state.orangList];
+                    newOrangList[orangIndex] = updatedOrang;
+                    return { ...state, orangList: newOrangList };
+                }
+
+                case 'TAMBAH_CICILAN': {
+                    const { orangId, hutangId, jumlah, tanggalDibayar, namaPembayar, metode, nomorReferensiBank } = action.payload;
+                    const orangIndex = state.orangList.findIndex(o => o.id === orangId);
+                    if (orangIndex === -1) return state;
+
+                    const orang = state.orangList[orangIndex];
+                    const hutangIndex = orang.hutang.findIndex(h => h.idHutang === hutangId);
+                    if (hutangIndex === -1) return state;
+
+                    const hutang = orang.hutang[hutangIndex];
+                    const totalCicilan = hutang.cicilan.reduce((sum, c) => sum + c.jumlah, 0);
+                    const sisaHutang = hutang.totalHutang - totalCicilan;
+
+                    if (jumlah <= 0 || jumlah > sisaHutang) return state;
+
+                    const saldoSebelum = sisaHutang;
+                    const saldoSesudah = saldoSebelum - jumlah;
+
+                    const cicilanBaru = {
+                        idTransaksi: generateId(),
+                        tanggalDibuat: new Date().toISOString(),
+                        tanggalDibayar,
+                        jumlah,
+                        saldoSebelum,
+                        saldoSesudah,
+                        namaPembayar,
+                        metode,
+                        nomorReferensiBank: metode === 'Transfer Bank' ? nomorReferensiBank : null
+                    };
+
+                    const updatedHutang = {
+                        ...hutang,
+                        cicilan: [...hutang.cicilan, cicilanBaru]
+                    };
+
+                    const updatedOrang = { ...orang };
+                    updatedOrang.hutang = [...orang.hutang];
+                    updatedOrang.hutang[hutangIndex] = updatedHutang;
+
+                    const newOrangList = [...state.orangList];
+                    newOrangList[orangIndex] = updatedOrang;
+                    return { ...state, orangList: newOrangList };
+                }
+
+                // ========== TRANSAKSI PENGELUARAN ==========
+                case 'TAMBAH_TRANSAKSI': {
+                    const transaksiBaru = {
+                        id: generateId(),
+                        ...action.payload,
+                        tanggalDibuat: new Date().toISOString()
+                    };
+                    return { ...state, transaksiList: [transaksiBaru, ...state.transaksiList] };
+                }
+
+                case 'HAPUS_TRANSAKSI': {
+                    const { id } = action.payload;
+                    return { ...state, transaksiList: state.transaksiList.filter(t => t.id !== id) };
+                }
+
+                case 'EDIT_TRANSAKSI': {
+                    const { id, updates } = action.payload;
+                    const index = state.transaksiList.findIndex(t => t.id === id);
+                    if (index === -1) return state;
+                    const updatedTransaksi = { ...state.transaksiList[index], ...updates };
+                    const newList = [...state.transaksiList];
+                    newList[index] = updatedTransaksi;
+                    return { ...state, transaksiList: newList };
+                }
+
+                default:
+                    return state;
+            }
+        }
+
+        // ==================== CUSTOM HOOK ====================
+        function useDataStorage() {
+            const [state, dispatch] = useReducer(dataReducer, initialState);
+
+            useEffect(() => {
+                const stored = localStorage.getItem('skyledger_data');
+                if (stored) {
+                    try {
+                        const parsed = JSON.parse(stored);
+                        dispatch({ type: 'INIT', payload: parsed });
+                    } catch (e) {}
+                }
+            }, []);
+
+            useEffect(() => {
+                localStorage.setItem('skyledger_data', JSON.stringify(state));
+            }, [state]);
+
+            return [state, dispatch];
+        }
+
+        // ==================== KOMPONEN LOGIN (Glassmorphism + Ikon Kustom) ====================
+        function Login({ onLogin }) {
+            const [username, setUsername] = useState('');
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                const cleanUsername = username.trim();
+                const cleanPassword = password.trim();
+                const hash = CryptoJS.SHA256(cleanPassword).toString();
+
+                if (cleanUsername === VALID_USERNAME && hash === VALID_PASSWORD_HASH) {
+                    onLogin();
+                } else {
+                    setError('Username atau password salah.');
+                }
+            };
+
+            return (
+                <div className="min-h-screen flex items-center justify-center p-4">
+                    <div className="glass-card w-full max-w-md p-8">
+                        <div className="text-center mb-8">
+                            {/* Dua ikon: cloud-sun dan book */}
+                            <div className="flex justify-center gap-2 text-5xl text-blue-600 mb-4">
+                                <i className="fas fa-cloud-sun"></i>
+                                <i className="fas fa-book"></i>
+                            </div>
+                            <h1 className="text-4xl font-bold text-gray-800">SkyLedger</h1>
+                            <p className="text-gray-500 mt-2">Langitkan Finansialmu</p>
+                        </div>
+                        <form onSubmit={handleSubmit}>
+                            <div className="mb-4">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                                <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500" required />
+                            </div>
+                            <div className="mb-6">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500" required />
+                            </div>
+                            {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
+                            <button type="submit" className="btn-primary w-full">Masuk</button>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        // ==================== KOMPONEN REAL TIME CLOCK ====================
+        function RealTimeClock() {
+            const [time, setTime] = useState(new Date());
+
+            useEffect(() => {
+                const timer = setInterval(() => setTime(new Date()), 1000);
+                return () => clearInterval(timer);
+            }, []);
+
+            return (
+                <div className="text-sm text-gray-600">
+                    {time.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}{' '}
+                    {time.toLocaleTimeString('id-ID')}
+                </div>
+            );
+        }
+
+        // ==================== MODAL BARCODE (untuk orang) ====================
+        function ModalBarcode({ orang, onClose }) {
+            const qrRef = useRef();
+
+            useEffect(() => {
+                if (qrRef.current && orang) {
+                    if (typeof qrcode === 'undefined') {
+                        qrRef.current.innerHTML = '<p class="text-red-500">Library QR code tidak tersedia</p>';
+                        return;
+                    }
+                    try {
+                        const data = JSON.stringify({
+                            id: orang.id,
+                            nama: orang.nama,
+                            hutang: orang.hutang.map(h => ({
+                                idHutang: h.idHutang,
+                                totalHutang: h.totalHutang,
+                                tanggal: h.tanggal,
+                                deskripsi: h.deskripsi,
+                                cicilan: h.cicilan
+                            }))
+                        });
+                        const qr = qrcode(0, 'M');
+                        qr.addData(data);
+                        qr.make();
+                        const imgTag = qr.createImgTag(4, 0);
+                        qrRef.current.innerHTML = imgTag;
+                    } catch (e) {
+                        qrRef.current.innerHTML = '<p class="text-red-500">Gagal membuat QR code</p>';
+                    }
+                }
+            }, [orang]);
+
+            const totalHutang = orang.hutang.reduce((sum, h) => sum + h.totalHutang, 0);
+            const totalCicilan = orang.hutang.reduce((sum, h) => sum + h.cicilan.reduce((s, c) => s + c.jumlah, 0), 0);
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+                    <div className="bg-white rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                        <h3 className="text-xl font-semibold mb-4">Barcode {orang.nama}</h3>
+                        <div className="flex flex-col md:flex-row gap-6">
+                            <div className="flex justify-center md:w-1/2">
+                                <div ref={qrRef}></div>
+                            </div>
+                            <div className="md:w-1/2 space-y-3">
+                                <h4 className="font-semibold text-lg">Data dalam QR Code</h4>
+                                <p><span className="font-medium">Nama:</span> {orang.nama}</p>
+                                <p><span className="font-medium">Total Hutang:</span> {formatCurrency(totalHutang)}</p>
+                                <p><span className="font-medium">Total Cicilan Dibayar:</span> {formatCurrency(totalCicilan)}</p>
+                                <p><span className="font-medium">Sisa Hutang:</span> {formatCurrency(totalHutang - totalCicilan)}</p>
+                                <p><span className="font-medium">Jumlah Hutang:</span> {orang.hutang.length}</p>
+                                {orang.hutang.map((h, idx) => (
+                                    <div key={idx} className="border-t pt-2 mt-2">
+                                        <p className="font-medium">Hutang #{idx+1}: {formatCurrency(h.totalHutang)}</p>
+                                        {h.deskripsi && <p className="text-sm text-gray-600">Deskripsi: {h.deskripsi}</p>}
+                                        <p className="text-sm">Tanggal: {formatDateOnly(h.tanggal)}</p>
+                                        <p className="text-sm">Cicilan: {h.cicilan.length} kali</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="flex justify-end mt-6">
+                            <button onClick={onClose} className="btn-primary">Tutup</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ==================== MODAL SCANNER ====================
+        function ModalScanner({ onClose, onScanResult }) {
+            const videoRef = useRef();
+            const canvasRef = useRef();
+            const [scanning, setScanning] = useState(true);
+            const [error, setError] = useState('');
+
+            useEffect(() => {
+                let stream = null;
+                if (scanning) {
+                    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+                        .then(s => {
+                            stream = s;
+                            if (videoRef.current) {
+                                videoRef.current.srcObject = s;
+                                videoRef.current.play();
+                                requestAnimationFrame(tick);
+                            }
+                        })
+                        .catch(err => {
+                            setError('Tidak dapat mengakses kamera. Pastikan izin diberikan.');
+                            setScanning(false);
+                        });
+                }
+                return () => {
+                    if (stream) {
+                        stream.getTracks().forEach(track => track.stop());
+                    }
+                };
+            }, [scanning]);
+
+            const tick = () => {
+                if (!scanning) return;
+                if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
+                    const canvas = canvasRef.current;
+                    const video = videoRef.current;
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    const code = jsQR(imageData.data, canvas.width, canvas.height);
+                    if (code) {
+                        setScanning(false);
+                        onScanResult(code.data);
+                    } else {
+                        requestAnimationFrame(tick);
+                    }
+                } else {
+                    requestAnimationFrame(tick);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+                        <h3 className="text-xl font-semibold mb-4">Pindai Barcode</h3>
+                        {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
+                        <video ref={videoRef} className="w-full rounded-lg mb-4" autoPlay playsInline></video>
+                        <canvas ref={canvasRef} className="hidden"></canvas>
+                        <div className="flex justify-end space-x-2">
+                            <button onClick={onClose} className="btn-secondary">Batal</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ==================== RINGKASAN HUTANG ====================
+        function RingkasanHutang({ orangList }) {
+            const totalHutang = orangList.reduce((sum, o) => sum + o.hutang.reduce((s, h) => s + h.totalHutang, 0), 0);
+            const totalCicilan = orangList.reduce((sum, o) => sum + o.hutang.reduce((s, h) => s + h.cicilan.reduce((c, c2) => c + c2.jumlah, 0), 0), 0);
+            const sisaHutang = totalHutang - totalCicilan;
+
+            return (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div className="card p-6 border-l-4 border-blue-800">
+                        <p className="text-sm text-gray-500">Total Hutang</p>
+                        <p className="text-2xl font-bold text-gray-800">{formatCurrency(totalHutang)}</p>
+                    </div>
+                    <div className="card p-6 border-l-4 border-green-700">
+                        <p className="text-sm text-gray-500">Total Cicilan Dibayar</p>
+                        <p className="text-2xl font-bold text-gray-800">{formatCurrency(totalCicilan)}</p>
+                    </div>
+                    <div className="card p-6 border-l-4 border-orange-600">
+                        <p className="text-sm text-gray-500">Sisa Hutang</p>
+                        <p className="text-2xl font-bold text-gray-800">{formatCurrency(sisaHutang)}</p>
+                    </div>
+                </div>
+            );
+        }
+
+        // ==================== MODAL EDIT NAMA ORANG ====================
+        function ModalEditNama({ orang, onClose, onEdit }) {
+            const [namaBaru, setNamaBaru] = useState(orang.nama);
+
+            const handleUpdate = () => {
+                if (!namaBaru.trim()) return alert('Nama tidak boleh kosong');
+                onEdit(orang.id, namaBaru.trim());
+                onClose();
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+                        <h3 className="text-xl font-semibold mb-4">Edit Nama Pihak</h3>
+                        <input type="text" className="border rounded-lg p-3 w-full mb-4" value={namaBaru} onChange={e => setNamaBaru(e.target.value)} placeholder="Nama baru" />
+                        <div className="flex justify-end space-x-2">
+                            <button onClick={onClose} className="btn-secondary">Batal</button>
+                            <button onClick={handleUpdate} className="btn-primary">Simpan</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ==================== SIDEBAR (dengan menu yang tersisa) ====================
+        function Sidebar({ orangList, selectedOrangId, onSelectOrang, onTambahOrang, onEditNama, onHapusOrang, activeMenu, setActiveMenu, dispatch }) {
+            const [namaBaru, setNamaBaru] = useState('');
+            const [editingOrang, setEditingOrang] = useState(null);
+            const [showScanner, setShowScanner] = useState(false);
+
+            const handleTambah = (e) => {
+                e.preventDefault();
+                if (!namaBaru.trim()) return;
+                onTambahOrang(namaBaru);
+                setNamaBaru('');
+            };
+
+            const handleScanResult = (dataString) => {
+                try {
+                    const data = JSON.parse(dataString);
+                    const existing = orangList.find(o => o.nama.toLowerCase() === data.nama.toLowerCase());
+                    if (existing) {
+                        alert(`Orang dengan nama ${data.nama} sudah ada.`);
+                        return;
+                    }
+                    const newId = generateId();
+                    dispatch({
+                        type: 'TAMBAH_ORANG_DARI_SCAN',
+                        payload: {
+                            id: newId,
+                            nama: data.nama,
+                            hutang: data.hutang
+                        }
+                    });
+                    onSelectOrang(newId);
+                    alert(`Data ${data.nama} berhasil ditambahkan.`);
+                } catch (e) {
+                    alert('Data QR code tidak valid.');
+                }
+            };
+
+            return (
+                <div className="card p-4 h-full">
+                    <div className="mb-4">
+                        <button 
+                            onClick={() => setActiveMenu('hutang')} 
+                            className={`w-full text-left p-3 rounded-lg transition ${activeMenu === 'hutang' ? 'bg-blue-100 text-blue-900 font-medium' : 'hover:bg-gray-100'}`}
+                        >
+                            <i className="fas fa-credit-card mr-2"></i> Hutang
+                        </button>
+                        <button 
+                            onClick={() => setActiveMenu('pengeluaran')} 
+                            className={`w-full text-left p-3 rounded-lg transition mt-1 ${activeMenu === 'pengeluaran' ? 'bg-blue-100 text-blue-900 font-medium' : 'hover:bg-gray-100'}`}
+                        >
+                            <i className="fas fa-wallet mr-2"></i> Pengeluaran
+                        </button>
+                        <button 
+                            onClick={() => setShowScanner(true)} 
+                            className="w-full text-left p-3 rounded-lg transition mt-1 bg-purple-100 text-purple-900 hover:bg-purple-200"
+                        >
+                            <i className="fas fa-camera mr-2"></i> Scan Barcode
+                        </button>
+                    </div>
+
+                    {activeMenu === 'hutang' && (
+                        <>
+                            <h2 className="text-lg font-semibold mb-4">Daftar Pihak</h2>
+                            <form onSubmit={handleTambah} className="mb-4 flex gap-2">
+                                <input type="text" placeholder="Nama baru" value={namaBaru} onChange={(e) => setNamaBaru(e.target.value)} className="border rounded-lg p-2 flex-1" />
+                                <button type="submit" className="btn-primary text-sm px-3 py-2"><i className="fas fa-plus"></i></button>
+                            </form>
+                            <ul className="space-y-2">
+                                {orangList.map(orang => (
+                                    <li key={orang.id} className="flex items-center gap-1">
+                                        <button 
+                                            onClick={() => onSelectOrang(orang.id)}
+                                            className={`flex-1 text-left p-3 rounded-lg transition ${selectedOrangId === orang.id ? 'bg-blue-100 text-blue-900 font-medium' : 'hover:bg-gray-100'}`}
+                                        >
+                                            {orang.nama}
+                                        </button>
+                                        <button onClick={() => setEditingOrang(orang)} className="text-gray-500 hover:text-blue-600 p-2" title="Edit Nama">
+                                            <i className="fas fa-edit"></i>
+                                        </button>
+                                        <button onClick={() => setEditingOrang(orang)} className="text-gray-500 hover:text-green-600 p-2" title="Lihat Barcode">
+                                            <i className="fas fa-qrcode"></i>
+                                        </button>
+                                        <button onClick={() => { if (confirm(`Hapus pihak ${orang.nama}? Semua data hutang akan hilang.`)) onHapusOrang(orang.id); }} className="text-gray-500 hover:text-red-600 p-2" title="Hapus">
+                                            <i className="fas fa-trash"></i>
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                            {editingOrang && (
+                                <ModalEditNama 
+                                    orang={editingOrang} 
+                                    onClose={() => setEditingOrang(null)} 
+                                    onEdit={onEditNama} 
+                                />
+                            )}
+                        </>
+                    )}
+
+                    {editingOrang && editingOrang.id && (
+                        <ModalBarcode 
+                            orang={editingOrang} 
+                            onClose={() => setEditingOrang(null)} 
+                        />
+                    )}
+
+                    {showScanner && (
+                        <ModalScanner 
+                            onClose={() => setShowScanner(false)} 
+                            onScanResult={handleScanResult}
+                        />
+                    )}
+                </div>
+            );
+        }
+
+        // ==================== DETAIL ORANG (HUTANG) dengan fitur tampilkan 3 transaksi terbaru ====================
+        function DetailOrang({ orang, dispatch, onTambahHutang, onCicil, onEditHutang, onHapusHutang }) {
+            const [showTambahHutang, setShowTambahHutang] = useState(false);
+            const [formHutang, setFormHutang] = useState({ total: '', tanggal: new Date().toISOString().slice(0,10), deskripsi: '' });
+            const [expandedHistories, setExpandedHistories] = useState([]);
+
+            const handleTambahHutang = (e) => {
+                e.preventDefault();
+                if (!formHutang.total || formHutang.total <= 0) return;
+                onTambahHutang(orang.id, Number(formHutang.total), formHutang.tanggal, formHutang.deskripsi);
+                setFormHutang({ total: '', tanggal: new Date().toISOString().slice(0,10), deskripsi: '' });
+                setShowTambahHutang(false);
+            };
+
+            const getStatus = (hutang) => {
+                const totalCicilan = hutang.cicilan.reduce((s, c) => s + c.jumlah, 0);
+                return totalCicilan >= hutang.totalHutang ? 'Lunas' : 'Belum Lunas';
+            };
+
+            const toggleExpand = (hutangId) => {
+                if (expandedHistories.includes(hutangId)) {
+                    setExpandedHistories(expandedHistories.filter(id => id !== hutangId));
+                } else {
+                    setExpandedHistories([...expandedHistories, hutangId]);
+                }
+            };
+
+            return (
+                <div className="space-y-6">
+                    <div className="flex justify-between items-center">
+                        <h2 className="text-2xl font-bold text-gray-800">{orang.nama}</h2>
+                        <button onClick={() => setShowTambahHutang(!showTambahHutang)} className="btn-primary">
+                            <i className="fas fa-plus mr-2"></i>Tambah Hutang
+                        </button>
+                    </div>
+
+                    {showTambahHutang && (
+                        <div className="card p-4">
+                            <form onSubmit={handleTambahHutang} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <input type="number" placeholder="Total Hutang" value={formHutang.total} onChange={e => setFormHutang({...formHutang, total: e.target.value})} className="border rounded-lg p-2" required />
+                                <input type="date" value={formHutang.tanggal} onChange={e => setFormHutang({...formHutang, tanggal: e.target.value})} className="border rounded-lg p-2" required />
+                                <input type="text" placeholder="Deskripsi" value={formHutang.deskripsi} onChange={e => setFormHutang({...formHutang, deskripsi: e.target.value})} className="border rounded-lg p-2" />
+                                <button type="submit" className="btn-primary md:col-span-3">Simpan Hutang</button>
+                            </form>
+                        </div>
+                    )}
+
+                    {orang.hutang.length === 0 ? (
+                        <div className="card p-8 text-center text-gray-500">
+                            Belum ada hutang atas nama {orang.nama}.
+                        </div>
+                    ) : (
+                        orang.hutang.map(hutang => {
+                            const totalCicilan = hutang.cicilan.reduce((s, c) => s + c.jumlah, 0);
+                            const sisa = hutang.totalHutang - totalCicilan;
+                            const status = getStatus(hutang);
+
+                            const sortedCicilan = [...hutang.cicilan].sort((a, b) => new Date(b.tanggalDibuat) - new Date(a.tanggalDibuat));
+                            const isExpanded = expandedHistories.includes(hutang.idHutang);
+                            const displayedCicilan = isExpanded ? sortedCicilan : sortedCicilan.slice(0, 3);
+                            const hasMore = hutang.cicilan.length > 3;
+
+                            return (
+                                <div key={hutang.idHutang} className="card p-5 mb-4">
+                                    <div className="flex flex-wrap justify-between items-start mb-4">
+                                        <div>
+                                            <p className="text-sm text-gray-500">Tanggal Hutang: {formatDateOnly(hutang.tanggal)}</p>
+                                            <p className="text-xl font-semibold text-gray-800">{formatCurrency(hutang.totalHutang)}</p>
+                                            {hutang.deskripsi && <p className="text-sm text-gray-600 mt-1">{hutang.deskripsi}</p>}
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${status === 'Lunas' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                                                {status}
+                                            </span>
+                                            <button onClick={() => onEditHutang(orang, hutang)} className="text-gray-400 hover:text-blue-600 transition" title="Edit Hutang">
+                                                <i className="fas fa-edit"></i>
+                                            </button>
+                                            <button onClick={() => { if (confirm(`Hapus hutang ini? Semua cicilan akan ikut terhapus.`)) onHapusHutang(orang.id, hutang.idHutang); }} className="text-gray-400 hover:text-red-600 transition" title="Hapus Hutang">
+                                                <i className="fas fa-trash"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-3 gap-3 bg-gray-50 p-3 rounded-lg mb-4">
+                                        <div>
+                                            <p className="text-xs text-gray-500">Total Cicilan</p>
+                                            <p className="font-semibold text-gray-700">{formatCurrency(totalCicilan)}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-xs text-gray-500">Sisa Hutang</p>
+                                            <p className="font-semibold text-orange-600">{formatCurrency(sisa)}</p>
+                                        </div>
+                                        <div className="flex items-end justify-end">
+                                            <button onClick={() => onCicil(orang, hutang)} className="btn-primary text-sm py-1 px-3" disabled={status === 'Lunas'}>
+                                                <i className="fas fa-money-bill-wave mr-1"></i>Bayar
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {hutang.cicilan.length > 0 && (
+                                        <div className="mt-4">
+                                            <h4 className="font-semibold text-gray-700 mb-3">Riwayat Transaksi</h4>
+                                            <div className="space-y-3">
+                                                {displayedCicilan.map(cicilan => (
+                                                    <div key={cicilan.idTransaksi} className="bg-gray-50 p-4 rounded-lg relative">
+                                                        <div className="grid grid-cols-2 gap-3 mb-2">
+                                                            <div>
+                                                                <p className="text-xs text-gray-400">Dibuat</p>
+                                                                <p className="text-sm font-medium">{formatDate(cicilan.tanggalDibuat)}</p>
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-xs text-gray-400">Dibayar</p>
+                                                                <p className="text-sm font-medium">{formatDateSmart(cicilan.tanggalDibayar)}</p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex justify-between items-center mb-1">
+                                                            <span className="font-mono text-xs text-gray-400">#{cicilan.idTransaksi.slice(-8)}</span>
+                                                            <span className="text-green-600 text-xs font-semibold bg-green-100 px-2 py-0.5 rounded-full">BERHASIL</span>
+                                                        </div>
+                                                        <div className="grid grid-cols-2 gap-2 text-sm">
+                                                            <div>
+                                                                <p className="text-gray-500">Nominal</p>
+                                                                <p className="font-bold text-blue-800">{formatCurrency(cicilan.jumlah)}</p>
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-gray-500">Pembayar</p>
+                                                                <p>{cicilan.namaPembayar}</p>
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-gray-500">Metode</p>
+                                                                <p>{cicilan.metode}</p>
+                                                            </div>
+                                                            {cicilan.metode === 'Transfer Bank' && (
+                                                                <div>
+                                                                    <p className="text-gray-500">No. Referensi</p>
+                                                                    <p className="font-mono text-xs">{cicilan.nomorReferensiBank}</p>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        <div className="grid grid-cols-2 gap-2 text-sm mt-2 pt-2 border-t border-dashed border-gray-200">
+                                                            <div>
+                                                                <p className="text-gray-500">Saldo Sebelum</p>
+                                                                <p>{formatCurrency(cicilan.saldoSebelum)}</p>
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-gray-500">Saldo Sesudah</p>
+                                                                <p>{formatCurrency(cicilan.saldoSesudah)}</p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            {hasMore && (
+                                                <div className="text-center mt-3">
+                                                    <button 
+                                                        onClick={() => toggleExpand(hutang.idHutang)} 
+                                                        className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                                                    >
+                                                        {isExpanded ? 'Tampilkan sedikit' : 'Lihat semua riwayat'}
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
+            );
+        }
+
+        // ==================== PENGELUARAN (dengan pembatasan tanggal dan chip wrap) ====================
+        function PemasukanPengeluaran({ state, dispatch }) {
+            const [showForm, setShowForm] = useState(false);
+            const [searchTerm, setSearchTerm] = useState('');
+            const [selectedCategory, setSelectedCategory] = useState('all');
+            const [selectedMonth, setSelectedMonth] = useState('all');
+
+            // Tentukan apakah fitur sudah dapat diakses (setelah 7 Maret 2026)
+            const today = new Date();
+            const batasTanggal = new Date('2026-03-07');
+            const fiturTersedia = today >= batasTanggal;
+
+            // Ambil semua kategori unik dari transaksi
+            const allCategories = ['all', ...new Set(state.transaksiList.map(t => t.kategori))];
+            
+            // Ambil semua bulan-tahun unik dari transaksi (berdasarkan tanggal)
+            const monthOptions = ['all'];
+            const monthSet = new Set();
+            state.transaksiList.forEach(t => {
+                if (t.tanggal) {
+                    const d = new Date(t.tanggal);
+                    const monthYear = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+                    monthSet.add(monthYear);
+                }
+            });
+            const sortedMonths = Array.from(monthSet).sort().reverse();
+            sortedMonths.forEach(m => {
+                const [year, month] = m.split('-');
+                const monthName = new Date(year, month-1).toLocaleString('id-ID', { month: 'long' });
+                monthOptions.push({ value: m, label: `${monthName} ${year}` });
+            });
+
+            // Filter dan urutkan transaksi (hanya jika fitur tersedia)
+            const filteredAndSorted = fiturTersedia 
+                ? state.transaksiList
+                    .filter(t => {
+                        if (selectedCategory !== 'all' && t.kategori !== selectedCategory) return false;
+                        if (selectedMonth !== 'all') {
+                            const d = new Date(t.tanggal);
+                            const monthYear = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+                            if (monthYear !== selectedMonth) return false;
+                        }
+                        if (searchTerm) {
+                            const term = searchTerm.toLowerCase();
+                            return t.kategori.toLowerCase().includes(term) || 
+                                   (t.deskripsi && t.deskripsi.toLowerCase().includes(term)) ||
+                                   (t.items && t.items.some(item => item.nama.toLowerCase().includes(term)));
+                        }
+                        return true;
+                    })
+                    .sort((a, b) => new Date(b.tanggal) - new Date(a.tanggal))
+                : [];
+
+            const totalFiltered = filteredAndSorted.reduce((sum, t) => sum + t.nominal, 0);
+            const totalPengeluaran = state.transaksiList.reduce((sum, t) => sum + t.nominal, 0);
+
+            // ========== Form state (sama seperti sebelumnya) ==========
+            const [tanggal, setTanggal] = useState(new Date().toISOString().slice(0,10));
+            const [jam, setJam] = useState('');
+            const [kategoriPilihan, setKategoriPilihan] = useState('');
+            const [kategoriManual, setKategoriManual] = useState('');
+            const [nominal, setNominal] = useState('');
+            const [deskripsi, setDeskripsi] = useState('');
+            
+            // State khusus untuk Pembelian Makanan HF
+            const [itemsHF, setItemsHF] = useState([]);
+            const [kasirHF, setKasirHF] = useState('');
+            const [metodeHF, setMetodeHF] = useState('Cash');
+            const [nominalBayarHF, setNominalBayarHF] = useState('');
+            const [kembalianHF, setKembalianHF] = useState(0);
+
+            // State khusus untuk Belanja Gafika PP Ngalah
+            const [itemsGafika, setItemsGafika] = useState([]);
+            const [tanggalDilakukan, setTanggalDilakukan] = useState(new Date().toISOString().slice(0,10));
+            const [jamDilakukan, setJamDilakukan] = useState('');
+            const [metodeGafika, setMetodeGafika] = useState('Cash');
+            const [nominalBayarGafika, setNominalBayarGafika] = useState('');
+            const [kembalianGafika, setKembalianGafika] = useState(0);
+            const [nomorReferensiGafika, setNomorReferensiGafika] = useState('');
+
+            // State khusus untuk Belanja Di Pasar Senggol (tanpa kasir)
+            const [itemsPasar, setItemsPasar] = useState([]);
+            const [metodePasar, setMetodePasar] = useState('Cash');
+            const [nominalBayarPasar, setNominalBayarPasar] = useState('');
+            const [kembalianPasar, setKembalianPasar] = useState(0);
+
+            // State khusus untuk Belanja Di Duta Swalayan (tanpa kasir)
+            const [itemsDuta, setItemsDuta] = useState([]);
+            const [metodeDuta, setMetodeDuta] = useState('Cash');
+            const [nominalBayarDuta, setNominalBayarDuta] = useState('');
+            const [kembalianDuta, setKembalianDuta] = useState(0);
+
+            const [error, setError] = useState('');
+
+            // Hitung total
+            const totalItemsHF = itemsHF.reduce((sum, item) => sum + (Number(item.qty) * Number(item.harga)), 0);
+            const totalItemsGafika = itemsGafika.reduce((sum, item) => sum + (Number(item.qty) * Number(item.harga)), 0);
+            const totalItemsPasar = itemsPasar.reduce((sum, item) => sum + (Number(item.qty) * Number(item.harga)), 0);
+            const totalItemsDuta = itemsDuta.reduce((sum, item) => sum + (Number(item.qty) * Number(item.harga)), 0);
+
+            // Efek kembalian
+            useEffect(() => {
+                if (nominalBayarHF && totalItemsHF) {
+                    const bayar = Number(nominalBayarHF);
+                    if (!isNaN(bayar)) setKembalianHF(bayar - totalItemsHF);
+                } else setKembalianHF(0);
+            }, [nominalBayarHF, totalItemsHF]);
+
+            useEffect(() => {
+                if (nominalBayarGafika && totalItemsGafika) {
+                    const bayar = Number(nominalBayarGafika);
+                    if (!isNaN(bayar)) setKembalianGafika(bayar - totalItemsGafika);
+                } else setKembalianGafika(0);
+            }, [nominalBayarGafika, totalItemsGafika]);
+
+            useEffect(() => {
+                if (nominalBayarPasar && totalItemsPasar) {
+                    const bayar = Number(nominalBayarPasar);
+                    if (!isNaN(bayar)) setKembalianPasar(bayar - totalItemsPasar);
+                } else setKembalianPasar(0);
+            }, [nominalBayarPasar, totalItemsPasar]);
+
+            useEffect(() => {
+                if (nominalBayarDuta && totalItemsDuta) {
+                    const bayar = Number(nominalBayarDuta);
+                    if (!isNaN(bayar)) setKembalianDuta(bayar - totalItemsDuta);
+                } else setKembalianDuta(0);
+            }, [nominalBayarDuta, totalItemsDuta]);
+
+            // Fungsi untuk item HF
+            const tambahItemHF = () => setItemsHF([...itemsHF, { nama: '', qty: 1, harga: '' }]);
+            const hapusItemHF = (index) => setItemsHF(itemsHF.filter((_, i) => i !== index));
+            const updateItemHF = (index, field, value) => {
+                const newItems = [...itemsHF];
+                if (field === 'qty' || field === 'harga') newItems[index][field] = value === '' ? '' : Number(value);
+                else newItems[index][field] = value;
+                setItemsHF(newItems);
+            };
+
+            // Fungsi untuk item Gafika
+            const tambahItemGafika = () => setItemsGafika([...itemsGafika, { nama: '', qty: 1, harga: '' }]);
+            const hapusItemGafika = (index) => setItemsGafika(itemsGafika.filter((_, i) => i !== index));
+            const updateItemGafika = (index, field, value) => {
+                const newItems = [...itemsGafika];
+                if (field === 'qty' || field === 'harga') newItems[index][field] = value === '' ? '' : Number(value);
+                else newItems[index][field] = value;
+                setItemsGafika(newItems);
+            };
+
+            // Fungsi untuk item Pasar Senggol
+            const tambahItemPasar = () => setItemsPasar([...itemsPasar, { nama: '', qty: 1, harga: '' }]);
+            const hapusItemPasar = (index) => setItemsPasar(itemsPasar.filter((_, i) => i !== index));
+            const updateItemPasar = (index, field, value) => {
+                const newItems = [...itemsPasar];
+                if (field === 'qty' || field === 'harga') newItems[index][field] = value === '' ? '' : Number(value);
+                else newItems[index][field] = value;
+                setItemsPasar(newItems);
+            };
+
+            // Fungsi untuk item Duta Swalayan
+            const tambahItemDuta = () => setItemsDuta([...itemsDuta, { nama: '', qty: 1, harga: '' }]);
+            const hapusItemDuta = (index) => setItemsDuta(itemsDuta.filter((_, i) => i !== index));
+            const updateItemDuta = (index, field, value) => {
+                const newItems = [...itemsDuta];
+                if (field === 'qty' || field === 'harga') newItems[index][field] = value === '' ? '' : Number(value);
+                else newItems[index][field] = value;
+                setItemsDuta(newItems);
+            };
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                setError('');
+
+                if (!fiturTersedia) {
+                    alert('Fitur pengeluaran belum tersedia. Silakan tunggu hingga 7 Maret 2026.');
+                    return;
+                }
+
+                let kategoriFinal = '';
+                if (kategoriPilihan === 'Lainnya') {
+                    if (!kategoriManual.trim()) return setError('Kategori harus diisi');
+                    kategoriFinal = kategoriManual.trim();
+                } else {
+                    kategoriFinal = kategoriPilihan;
+                }
+                if (!kategoriFinal) return setError('Pilih kategori');
+
+                const buatTransaksi = (data) => {
+                    dispatch({ type: 'TAMBAH_TRANSAKSI', payload: data });
+                    resetForm();
+                };
+
+                if (kategoriFinal === 'Pembelian Makanan HF') {
+                    if (itemsHF.length === 0) return setError('Minimal satu item harus ditambahkan');
+                    for (let item of itemsHF) {
+                        if (!item.nama.trim()) return setError('Nama item tidak boleh kosong');
+                        if (item.qty === '' || item.qty <= 0) return setError('Qty harus lebih dari 0');
+                        if (item.harga === '' || item.harga < 0) return setError('Harga tidak boleh negatif');
+                    }
+                    if (!kasirHF.trim()) return setError('Nama kasir harus diisi');
+                    if (!nominalBayarHF || Number(nominalBayarHF) < totalItemsHF) {
+                        return setError('Nominal bayar harus lebih besar atau sama dengan total');
+                    }
+
+                    let tanggalFinal = tanggal;
+                    if (jam) tanggalFinal = new Date(tanggal + 'T' + jam).toISOString();
+
+                    buatTransaksi({
+                        tipe: 'pengeluaran',
+                        tanggal: tanggalFinal,
+                        nominal: totalItemsHF,
+                        kategori: 'Pembelian Makanan HF',
+                        items: itemsHF,
+                        kasir: kasirHF,
+                        metodePembayaran: metodeHF,
+                        nominalBayar: Number(nominalBayarHF),
+                        kembalian: Number(nominalBayarHF) - totalItemsHF
+                    });
+                } 
+                else if (kategoriFinal === 'Belanja Gafika PP Ngalah') {
+                    if (itemsGafika.length === 0) return setError('Minimal satu item harus ditambahkan');
+                    for (let item of itemsGafika) {
+                        if (!item.nama.trim()) return setError('Nama barang tidak boleh kosong');
+                        if (item.qty === '' || item.qty <= 0) return setError('Qty harus lebih dari 0');
+                        if (item.harga === '' || item.harga < 0) return setError('Harga tidak boleh negatif');
+                    }
+                    if (!nominalBayarGafika || Number(nominalBayarGafika) < totalItemsGafika) {
+                        return setError('Nominal bayar harus lebih besar atau sama dengan total');
+                    }
+
+                    let tanggalDilakukanFinal = tanggalDilakukan;
+                    if (jamDilakukan) tanggalDilakukanFinal = new Date(tanggalDilakukan + 'T' + jamDilakukan).toISOString();
+
+                    const nomorReferensi = generateReferensi();
+
+                    buatTransaksi({
+                        tipe: 'pengeluaran',
+                        tanggalDibuat: new Date().toISOString(),
+                        tanggalDilakukan: tanggalDilakukanFinal,
+                        nominal: totalItemsGafika,
+                        kategori: 'Belanja Gafika PP Ngalah',
+                        items: itemsGafika,
+                        nomorReferensi: nomorReferensi,
+                        metodePembayaran: metodeGafika,
+                        nominalBayar: Number(nominalBayarGafika),
+                        kembalian: Number(nominalBayarGafika) - totalItemsGafika,
+                        status: 'SUDAH DIBAYAR'
+                    });
+                }
+                else if (kategoriFinal === 'Belanja Di Pasar Senggol') {
+                    if (itemsPasar.length === 0) return setError('Minimal satu item harus ditambahkan');
+                    for (let item of itemsPasar) {
+                        if (!item.nama.trim()) return setError('Nama item tidak boleh kosong');
+                        if (item.qty === '' || item.qty <= 0) return setError('Qty harus lebih dari 0');
+                        if (item.harga === '' || item.harga < 0) return setError('Harga tidak boleh negatif');
+                    }
+                    if (!nominalBayarPasar || Number(nominalBayarPasar) < totalItemsPasar) {
+                        return setError('Nominal bayar harus lebih besar atau sama dengan total');
+                    }
+
+                    let tanggalFinal = tanggal;
+                    if (jam) tanggalFinal = new Date(tanggal + 'T' + jam).toISOString();
+
+                    buatTransaksi({
+                        tipe: 'pengeluaran',
+                        tanggal: tanggalFinal,
+                        nominal: totalItemsPasar,
+                        kategori: 'Belanja Di Pasar Senggol',
+                        items: itemsPasar,
+                        metodePembayaran: metodePasar,
+                        nominalBayar: Number(nominalBayarPasar),
+                        kembalian: Number(nominalBayarPasar) - totalItemsPasar
+                    });
+                }
+                else if (kategoriFinal === 'Belanja Di Duta Swalayan') {
+                    if (itemsDuta.length === 0) return setError('Minimal satu item harus ditambahkan');
+                    for (let item of itemsDuta) {
+                        if (!item.nama.trim()) return setError('Nama item tidak boleh kosong');
+                        if (item.qty === '' || item.qty <= 0) return setError('Qty harus lebih dari 0');
+                        if (item.harga === '' || item.harga < 0) return setError('Harga tidak boleh negatif');
+                    }
+                    if (!nominalBayarDuta || Number(nominalBayarDuta) < totalItemsDuta) {
+                        return setError('Nominal bayar harus lebih besar atau sama dengan total');
+                    }
+
+                    let tanggalFinal = tanggal;
+                    if (jam) tanggalFinal = new Date(tanggal + 'T' + jam).toISOString();
+
+                    buatTransaksi({
+                        tipe: 'pengeluaran',
+                        tanggal: tanggalFinal,
+                        nominal: totalItemsDuta,
+                        kategori: 'Belanja Di Duta Swalayan',
+                        items: itemsDuta,
+                        metodePembayaran: metodeDuta,
+                        nominalBayar: Number(nominalBayarDuta),
+                        kembalian: Number(nominalBayarDuta) - totalItemsDuta
+                    });
+                }
+                else {
+                    if (!nominal || nominal <= 0) return setError('Nominal harus diisi dan positif');
+                    let tanggalFinal = tanggal;
+                    if (jam) tanggalFinal = new Date(tanggal + 'T' + jam).toISOString();
+                    buatTransaksi({
+                        tipe: 'pengeluaran',
+                        tanggal: tanggalFinal,
+                        nominal: Number(nominal),
+                        kategori: kategoriFinal,
+                        deskripsi: deskripsi || null
+                    });
+                }
+            };
+
+            const resetForm = () => {
+                setTanggal(new Date().toISOString().slice(0,10));
+                setJam('');
+                setKategoriPilihan('');
+                setKategoriManual('');
+                setNominal('');
+                setDeskripsi('');
+                setItemsHF([]);
+                setKasirHF('');
+                setMetodeHF('Cash');
+                setNominalBayarHF('');
+                setKembalianHF(0);
+                setItemsGafika([]);
+                setTanggalDilakukan(new Date().toISOString().slice(0,10));
+                setJamDilakukan('');
+                setMetodeGafika('Cash');
+                setNominalBayarGafika('');
+                setKembalianGafika(0);
+                setNomorReferensiGafika('');
+                setItemsPasar([]);
+                setMetodePasar('Cash');
+                setNominalBayarPasar('');
+                setKembalianPasar(0);
+                setItemsDuta([]);
+                setMetodeDuta('Cash');
+                setNominalBayarDuta('');
+                setKembalianDuta(0);
+                setShowForm(false);
+            };
+
+            // Fungsi untuk mendapatkan ikon berdasarkan kategori
+            const getCategoryIcon = (kategori) => {
+                if (kategori === 'Pembelian Makanan HF') return 'fa-utensils';
+                if (kategori === 'Belanja Gafika PP Ngalah') return 'fa-book-open';
+                if (kategori === 'Belanja Di Pasar Senggol') return 'fa-store';
+                if (kategori === 'Belanja Di Duta Swalayan') return 'fa-shopping-bag';
+                if (kategori.toLowerCase().includes('makan')) return 'fa-utensils';
+                if (kategori.toLowerCase().includes('transport')) return 'fa-car';
+                if (kategori.toLowerCase().includes('belanja')) return 'fa-shopping-cart';
+                if (kategori.toLowerCase().includes('tagihan')) return 'fa-file-invoice';
+                if (kategori.toLowerCase().includes('hiburan')) return 'fa-film';
+                return 'fa-receipt';
+            };
+
+            // Jika fitur belum tersedia, tampilkan banner saja
+            if (!fiturTersedia) {
+                return (
+                    <div className="space-y-6">
+                        {/* Banner Informasi Tanggal Akses */}
+                        <div className="card p-5 bg-gradient-to-r from-amber-400 to-orange-500 text-white shadow-lg">
+                            <div className="flex items-center gap-4">
+                                <div className="bg-white/20 backdrop-blur-sm p-3 rounded-full">
+                                    <i className="fas fa-calendar-alt text-3xl"></i>
+                                </div>
+                                <div className="flex-1">
+                                    <h3 className="text-xl font-bold mb-1">Fitur Pengeluaran Tersedia!</h3>
+                                    <p className="text-amber-100">
+                                        Mulai <span className="font-bold text-white">Sabtu, 7 Maret 2026</span>, Anda sudah dapat mencatat semua pengeluaran harian dengan mudah dan menarik. 
+                                        Manfaatkan fitur filter, kategori khusus, dan tampilan modern untuk mengelola keuangan Anda.
+                                    </p>
+                                </div>
+                                <div className="hidden md:block bg-white/30 backdrop-blur-sm px-4 py-2 rounded-full text-sm font-semibold">
+                                    #SiapKelolaUang
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Ringkasan (hanya untuk informasi, tidak bisa ditambah) */}
+                        <div className="card p-6 border-l-4 border-red-600">
+                            <p className="text-sm text-gray-500">Total Pengeluaran</p>
+                            <p className="text-2xl font-bold text-red-600">{formatCurrency(totalPengeluaran)}</p>
+                        </div>
+
+                        <div className="card p-12 text-center">
+                            <div className="text-6xl text-gray-300 mb-4">
+                                <i className="fas fa-lock"></i>
+                            </div>
+                            <p className="text-gray-500">Fitur ini akan tersedia mulai <span className="font-semibold">Sabtu, 7 Maret 2026</span>.</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            // Jika fitur tersedia, tampilkan semua komponen
+            return (
+                <div className="space-y-6">
+                    {/* Banner (tetap ditampilkan meskipun sudah tersedia, sebagai pengingat) */}
+                    <div className="card p-5 bg-gradient-to-r from-amber-400 to-orange-500 text-white shadow-lg">
+                        <div className="flex items-center gap-4">
+                            <div className="bg-white/20 backdrop-blur-sm p-3 rounded-full">
+                                <i className="fas fa-calendar-alt text-3xl"></i>
+                            </div>
+                            <div className="flex-1">
+                                <h3 className="text-xl font-bold mb-1">Fitur Pengeluaran Tersedia!</h3>
+                                <p className="text-amber-100">
+                                    Mulai <span className="font-bold text-white">Sabtu, 7 Maret 2026</span>, Anda sudah dapat mencatat semua pengeluaran harian dengan mudah dan menarik. 
+                                    Manfaatkan fitur filter, kategori khusus, dan tampilan modern untuk mengelola keuangan Anda.
+                                </p>
+                            </div>
+                            <div className="hidden md:block bg-white/30 backdrop-blur-sm px-4 py-2 rounded-full text-sm font-semibold">
+                                #SiapKelolaUang
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Ringkasan dan Tombol Tambah */}
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <div className="card p-6 border-l-4 border-red-600 flex-1">
+                            <p className="text-sm text-gray-500">Total Pengeluaran</p>
+                            <p className="text-2xl font-bold text-red-600">{formatCurrency(totalPengeluaran)}</p>
+                        </div>
+                        <button onClick={() => setShowForm(!showForm)} className="btn-primary whitespace-nowrap">
+                            <i className="fas fa-plus mr-2"></i>Tambah Pengeluaran
+                        </button>
+                    </div>
+
+                    {/* Filter Section */}
+                    <div className="card p-5 space-y-4">
+                        <div className="flex flex-col md:flex-row gap-4 items-center">
+                            <div className="relative flex-1">
+                                <i className="fas fa-search absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                                <input 
+                                    type="text" 
+                                    placeholder="Cari kategori atau deskripsi..." 
+                                    className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                />
+                            </div>
+                            <select 
+                                className="px-4 py-3 border border-gray-200 rounded-xl bg-white focus:ring-2 focus:ring-blue-500"
+                                value={selectedMonth}
+                                onChange={(e) => setSelectedMonth(e.target.value)}
+                            >
+                                <option value="all">Semua Bulan</option>
+                                {monthOptions.slice(1).map((opt, idx) => (
+                                    <option key={idx} value={opt.value}>{opt.label}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Category Chips dengan wrap */}
+                        <div className="flex flex-wrap gap-2 pb-2">
+                            {allCategories.map((cat, idx) => (
+                                <button
+                                    key={idx}
+                                    onClick={() => setSelectedCategory(cat)}
+                                    className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
+                                        selectedCategory === cat 
+                                            ? 'bg-blue-600 text-white' 
+                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                    }`}
+                                >
+                                    {cat === 'all' ? 'Semua' : cat}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Info Hasil Filter */}
+                        {filteredAndSorted.length > 0 && (
+                            <div className="text-sm text-gray-500 flex justify-between items-center pt-2 border-t border-gray-100">
+                                <span>Menampilkan {filteredAndSorted.length} transaksi</span>
+                                <span className="font-medium text-gray-700">Total: {formatCurrency(totalFiltered)}</span>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Form Tambah */}
+                    {showForm && (
+                        <div className="card p-6">
+                            <h3 className="text-lg font-semibold mb-4">Tambah Pengeluaran Baru</h3>
+                            {error && <div className="bg-red-100 text-red-700 p-3 rounded-lg mb-4 text-sm">{error}</div>}
+                            <form onSubmit={handleSubmit} className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Tanggal</label>
+                                    <input type="date" className="border rounded-lg p-2 w-full" value={tanggal} onChange={e => setTanggal(e.target.value)} required />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Jam (opsional)</label>
+                                    <input type="time" className="border rounded-lg p-2 w-full" value={jam} onChange={e => setJam(e.target.value)} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Kategori</label>
+                                    <select className="border rounded-lg p-2 w-full" value={kategoriPilihan} onChange={e => setKategoriPilihan(e.target.value)} required>
+                                        <option value="">Pilih Kategori</option>
+                                        <option value="Pembelian Makanan HF">Pembelian Makanan HF</option>
+                                        <option value="Belanja Gafika PP Ngalah">Belanja Gafika PP Ngalah</option>
+                                        <option value="Belanja Di Pasar Senggol">Belanja Di Pasar Senggol</option>
+                                        <option value="Belanja Di Duta Swalayan">Belanja Di Duta Swalayan</option>
+                                        <option value="Lainnya">Lainnya (ketik manual)</option>
+                                    </select>
+                                    {kategoriPilihan === 'Lainnya' && (
+                                        <input type="text" className="border rounded-lg p-2 w-full mt-2" placeholder="Masukkan kategori" value={kategoriManual} onChange={e => setKategoriManual(e.target.value)} required />
+                                    )}
+                                </div>
+
+                                {/* Form khusus Pembelian Makanan HF */}
+                                {kategoriPilihan === 'Pembelian Makanan HF' && (
+                                    <div className="space-y-4 border p-4 rounded-lg bg-gray-50">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Kasir</label>
+                                            <input type="text" className="border rounded-lg p-2 w-full" value={kasirHF} onChange={e => setKasirHF(e.target.value)} placeholder="Nama kasir" required />
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <h4 className="font-semibold">Daftar Item</h4>
+                                            <button type="button" onClick={tambahItemHF} className="btn-primary text-sm py-1 px-3">
+                                                <i className="fas fa-plus mr-1"></i>Tambah Item
+                                            </button>
+                                        </div>
+                                        {itemsHF.length === 0 ? (
+                                            <p className="text-gray-400 text-sm">Belum ada item. Klik "Tambah Item".</p>
+                                        ) : (
+                                            <div className="space-y-3">
+                                                {itemsHF.map((item, index) => (
+                                                    <div key={index} className="grid grid-cols-12 gap-2 items-center">
+                                                        <input type="text" placeholder="Nama" value={item.nama} onChange={e => updateItemHF(index, 'nama', e.target.value)} className="border rounded-lg p-2 col-span-5" required />
+                                                        <input type="number" placeholder="Qty" value={item.qty} onChange={e => updateItemHF(index, 'qty', e.target.value)} className="border rounded-lg p-2 col-span-2" required />
+                                                        <input type="number" placeholder="Harga" value={item.harga} onChange={e => updateItemHF(index, 'harga', e.target.value)} className="border rounded-lg p-2 col-span-3" required />
+                                                        <span className="font-semibold col-span-1 text-right">{item.qty && item.harga ? formatCurrency(item.qty * item.harga) : 'IDR 0'}</span>
+                                                        <button type="button" onClick={() => hapusItemHF(index)} className="text-red-500 hover:text-red-700 col-span-1">
+                                                            <i className="fas fa-trash"></i>
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                        <div className="text-right font-bold text-lg">
+                                            Total: {formatCurrency(totalItemsHF)}
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Metode Pembayaran</label>
+                                                <select className="border rounded-lg p-2 w-full" value={metodeHF} onChange={e => setMetodeHF(e.target.value)}>
+                                                    <option value="Cash">Cash</option>
+                                                    <option value="Transfer">Transfer</option>
+                                                    <option value="E-Wallet">E-Wallet</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Nominal Bayar</label>
+                                                <input type="number" className="border rounded-lg p-2 w-full" value={nominalBayarHF} onChange={e => setNominalBayarHF(e.target.value)} required />
+                                            </div>
+                                        </div>
+                                        <div className="text-right font-semibold">
+                                            Kembalian: {formatCurrency(kembalianHF)}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Form khusus Belanja Gafika PP Ngalah */}
+                                {kategoriPilihan === 'Belanja Gafika PP Ngalah' && (
+                                    <div className="space-y-4 border p-4 rounded-lg bg-gray-50">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Tanggal Dilakukan</label>
+                                                <input type="date" className="border rounded-lg p-2 w-full" value={tanggalDilakukan} onChange={e => setTanggalDilakukan(e.target.value)} required />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Jam Dilakukan (opsional)</label>
+                                                <input type="time" className="border rounded-lg p-2 w-full" value={jamDilakukan} onChange={e => setJamDilakukan(e.target.value)} />
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <h4 className="font-semibold">Daftar Item</h4>
+                                            <button type="button" onClick={tambahItemGafika} className="btn-primary text-sm py-1 px-3">
+                                                <i className="fas fa-plus mr-1"></i>Tambah Item
+                                            </button>
+                                        </div>
+                                        {itemsGafika.length === 0 ? (
+                                            <p className="text-gray-400 text-sm">Belum ada item. Klik "Tambah Item".</p>
+                                        ) : (
+                                            <div className="space-y-3">
+                                                {itemsGafika.map((item, index) => (
+                                                    <div key={index} className="grid grid-cols-12 gap-2 items-center">
+                                                        <input type="text" placeholder="Nama Barang" value={item.nama} onChange={e => updateItemGafika(index, 'nama', e.target.value)} className="border rounded-lg p-2 col-span-5" required />
+                                                        <input type="number" placeholder="Qty" value={item.qty} onChange={e => updateItemGafika(index, 'qty', e.target.value)} className="border rounded-lg p-2 col-span-2" required />
+                                                        <input type="number" placeholder="Harga" value={item.harga} onChange={e => updateItemGafika(index, 'harga', e.target.value)} className="border rounded-lg p-2 col-span-3" required />
+                                                        <span className="font-semibold col-span-1 text-right">{item.qty && item.harga ? formatCurrency(item.qty * item.harga) : 'IDR 0'}</span>
+                                                        <button type="button" onClick={() => hapusItemGafika(index)} className="text-red-500 hover:text-red-700 col-span-1">
+                                                            <i className="fas fa-trash"></i>
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                        <div className="text-right font-bold text-lg">
+                                            Total: {formatCurrency(totalItemsGafika)}
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Metode Pembayaran</label>
+                                                <select className="border rounded-lg p-2 w-full" value={metodeGafika} onChange={e => setMetodeGafika(e.target.value)}>
+                                                    <option value="Cash">Cash</option>
+                                                    <option value="Transfer">Transfer</option>
+                                                    <option value="E-Wallet">E-Wallet</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Nominal Bayar</label>
+                                                <input type="number" className="border rounded-lg p-2 w-full" value={nominalBayarGafika} onChange={e => setNominalBayarGafika(e.target.value)} required />
+                                            </div>
+                                        </div>
+                                        <div className="text-right font-semibold">
+                                            Kembalian: {formatCurrency(kembalianGafika)}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Form khusus Belanja Di Pasar Senggol (tanpa kasir) */}
+                                {kategoriPilihan === 'Belanja Di Pasar Senggol' && (
+                                    <div className="space-y-4 border p-4 rounded-lg bg-gray-50">
+                                        <div className="flex justify-between items-center">
+                                            <h4 className="font-semibold">Daftar Item</h4>
+                                            <button type="button" onClick={tambahItemPasar} className="btn-primary text-sm py-1 px-3">
+                                                <i className="fas fa-plus mr-1"></i>Tambah Item
+                                            </button>
+                                        </div>
+                                        {itemsPasar.length === 0 ? (
+                                            <p className="text-gray-400 text-sm">Belum ada item. Klik "Tambah Item".</p>
+                                        ) : (
+                                            <div className="space-y-3">
+                                                {itemsPasar.map((item, index) => (
+                                                    <div key={index} className="grid grid-cols-12 gap-2 items-center">
+                                                        <input type="text" placeholder="Nama Item" value={item.nama} onChange={e => updateItemPasar(index, 'nama', e.target.value)} className="border rounded-lg p-2 col-span-5" required />
+                                                        <input type="number" placeholder="Qty" value={item.qty} onChange={e => updateItemPasar(index, 'qty', e.target.value)} className="border rounded-lg p-2 col-span-2" required />
+                                                        <input type="number" placeholder="Harga" value={item.harga} onChange={e => updateItemPasar(index, 'harga', e.target.value)} className="border rounded-lg p-2 col-span-3" required />
+                                                        <span className="font-semibold col-span-1 text-right">{item.qty && item.harga ? formatCurrency(item.qty * item.harga) : 'IDR 0'}</span>
+                                                        <button type="button" onClick={() => hapusItemPasar(index)} className="text-red-500 hover:text-red-700 col-span-1">
+                                                            <i className="fas fa-trash"></i>
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                        <div className="text-right font-bold text-lg">
+                                            Total: {formatCurrency(totalItemsPasar)}
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Metode Pembayaran</label>
+                                                <select className="border rounded-lg p-2 w-full" value={metodePasar} onChange={e => setMetodePasar(e.target.value)}>
+                                                    <option value="Cash">Cash</option>
+                                                    <option value="Transfer">Transfer</option>
+                                                    <option value="E-Wallet">E-Wallet</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Nominal Bayar</label>
+                                                <input type="number" className="border rounded-lg p-2 w-full" value={nominalBayarPasar} onChange={e => setNominalBayarPasar(e.target.value)} required />
+                                            </div>
+                                        </div>
+                                        <div className="text-right font-semibold">
+                                            Kembalian: {formatCurrency(kembalianPasar)}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Form khusus Belanja Di Duta Swalayan (tanpa kasir) */}
+                                {kategoriPilihan === 'Belanja Di Duta Swalayan' && (
+                                    <div className="space-y-4 border p-4 rounded-lg bg-gray-50">
+                                        <div className="flex justify-between items-center">
+                                            <h4 className="font-semibold">Daftar Item</h4>
+                                            <button type="button" onClick={tambahItemDuta} className="btn-primary text-sm py-1 px-3">
+                                                <i className="fas fa-plus mr-1"></i>Tambah Item
+                                            </button>
+                                        </div>
+                                        {itemsDuta.length === 0 ? (
+                                            <p className="text-gray-400 text-sm">Belum ada item. Klik "Tambah Item".</p>
+                                        ) : (
+                                            <div className="space-y-3">
+                                                {itemsDuta.map((item, index) => (
+                                                    <div key={index} className="grid grid-cols-12 gap-2 items-center">
+                                                        <input type="text" placeholder="Nama Item" value={item.nama} onChange={e => updateItemDuta(index, 'nama', e.target.value)} className="border rounded-lg p-2 col-span-5" required />
+                                                        <input type="number" placeholder="Qty" value={item.qty} onChange={e => updateItemDuta(index, 'qty', e.target.value)} className="border rounded-lg p-2 col-span-2" required />
+                                                        <input type="number" placeholder="Harga" value={item.harga} onChange={e => updateItemDuta(index, 'harga', e.target.value)} className="border rounded-lg p-2 col-span-3" required />
+                                                        <span className="font-semibold col-span-1 text-right">{item.qty && item.harga ? formatCurrency(item.qty * item.harga) : 'IDR 0'}</span>
+                                                        <button type="button" onClick={() => hapusItemDuta(index)} className="text-red-500 hover:text-red-700 col-span-1">
+                                                            <i className="fas fa-trash"></i>
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                        <div className="text-right font-bold text-lg">
+                                            Total: {formatCurrency(totalItemsDuta)}
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Metode Pembayaran</label>
+                                                <select className="border rounded-lg p-2 w-full" value={metodeDuta} onChange={e => setMetodeDuta(e.target.value)}>
+                                                    <option value="Cash">Cash</option>
+                                                    <option value="Transfer">Transfer</option>
+                                                    <option value="E-Wallet">E-Wallet</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Nominal Bayar</label>
+                                                <input type="number" className="border rounded-lg p-2 w-full" value={nominalBayarDuta} onChange={e => setNominalBayarDuta(e.target.value)} required />
+                                            </div>
+                                        </div>
+                                        <div className="text-right font-semibold">
+                                            Kembalian: {formatCurrency(kembalianDuta)}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Form umum untuk kategori lain */}
+                                {kategoriPilihan && kategoriPilihan !== 'Pembelian Makanan HF' && kategoriPilihan !== 'Belanja Gafika PP Ngalah' && kategoriPilihan !== 'Belanja Di Pasar Senggol' && kategoriPilihan !== 'Belanja Di Duta Swalayan' && (
+                                    <>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Nominal</label>
+                                            <input type="number" className="border rounded-lg p-2 w-full" value={nominal} onChange={e => setNominal(e.target.value)} required />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Deskripsi (opsional)</label>
+                                            <input type="text" className="border rounded-lg p-2 w-full" value={deskripsi} onChange={e => setDeskripsi(e.target.value)} placeholder="Keterangan" />
+                                        </div>
+                                    </>
+                                )}
+
+                                <div className="flex justify-end space-x-2">
+                                    <button type="button" onClick={() => setShowForm(false)} className="btn-secondary">Batal</button>
+                                    <button type="submit" className="btn-primary">Simpan</button>
+                                </div>
+                            </form>
+                        </div>
+                    )}
+
+                    {/* Daftar Transaksi (Modern Cards) */}
+                    {filteredAndSorted.length === 0 ? (
+                        <div className="card p-12 text-center">
+                            <div className="text-6xl text-gray-300 mb-4">
+                                <i className="fas fa-receipt"></i>
+                            </div>
+                            <p className="text-gray-500">Belum ada transaksi pengeluaran.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {filteredAndSorted.map(t => (
+                                <div key={t.id} className="card p-4 hover:shadow-lg transition-shadow">
+                                    <div className="flex items-center gap-4">
+                                        {/* Icon kategori */}
+                                        <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white text-xl ${
+                                            t.kategori === 'Pembelian Makanan HF' ? 'bg-red-500' :
+                                            t.kategori === 'Belanja Gafika PP Ngalah' ? 'bg-green-600' :
+                                            t.kategori === 'Belanja Di Pasar Senggol' ? 'bg-orange-500' :
+                                            t.kategori === 'Belanja Di Duta Swalayan' ? 'bg-purple-500' :
+                                            'bg-blue-500'
+                                        }`}>
+                                            <i className={`fas ${getCategoryIcon(t.kategori)}`}></i>
+                                        </div>
+                                        
+                                        {/* Detail */}
+                                        <div className="flex-1">
+                                            <div className="flex justify-between items-start">
+                                                <div>
+                                                    <h3 className="font-semibold text-gray-800">{t.kategori}</h3>
+                                                    <p className="text-xs text-gray-500">{formatTransactionDate(t.tanggal)}</p>
+                                                    {t.deskripsi && <p className="text-sm text-gray-600 mt-1">{t.deskripsi}</p>}
+                                                    {(t.kategori === 'Pembelian Makanan HF' || t.kategori === 'Belanja Gafika PP Ngalah' || t.kategori === 'Belanja Di Pasar Senggol' || t.kategori === 'Belanja Di Duta Swalayan') && (
+                                                        <p className="text-xs text-gray-400 mt-1">{t.items.length} item</p>
+                                                    )}
+                                                    {t.kategori === 'Belanja Gafika PP Ngalah' && t.nomorReferensi && (
+                                                        <p className="text-xs text-gray-400">Ref: {t.nomorReferensi}</p>
+                                                    )}
+                                                </div>
+                                                <div className="text-right">
+                                                    <span className="font-bold text-red-600 text-lg">
+                                                        -{formatCurrency(t.nominal)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Tombol Hapus */}
+                                        <button 
+                                            onClick={() => { if (confirm('Hapus transaksi ini?')) dispatch({ type: 'HAPUS_TRANSAKSI', payload: { id: t.id } }); }} 
+                                            className="text-gray-400 hover:text-red-600 transition p-2"
+                                            title="Hapus"
+                                        >
+                                            <i className="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ==================== DASHBOARD ====================
+        function Dashboard() {
+            const [state, dispatch] = useDataStorage();
+            const [selectedOrangId, setSelectedOrangId] = useState(null);
+            const [showCicilModal, setShowCicilModal] = useState(false);
+            const [showEditModal, setShowEditModal] = useState(false);
+            const [selectedHutang, setSelectedHutang] = useState(null);
+            const [selectedOrangForModal, setSelectedOrangForModal] = useState(null);
+            const [activeMenu, setActiveMenu] = useState('hutang');
+
+            const selectedOrang = state.orangList.find(o => o.id === selectedOrangId);
+
+            const handleTambahOrang = (nama) => {
+                dispatch({ type: 'TAMBAH_ORANG', payload: { nama } });
+            };
+
+            const handleEditNamaOrang = (orangId, namaBaru) => {
+                dispatch({ type: 'EDIT_NAMA_ORANG', payload: { orangId, namaBaru } });
+            };
+
+            const handleHapusOrang = (orangId) => {
+                dispatch({ type: 'HAPUS_ORANG', payload: { orangId } });
+                if (selectedOrangId === orangId) setSelectedOrangId(null);
+            };
+
+            const handleTambahHutang = (orangId, total, tanggal, deskripsi) => {
+                dispatch({ type: 'TAMBAH_HUTANG', payload: { orangId, totalHutang: total, tanggal, deskripsi } });
+            };
+
+            const handleEditHutang = (orangId, hutangId, totalBaru, deskripsiBaru) => {
+                dispatch({ type: 'EDIT_HUTANG', payload: { orangId, hutangId, totalHutangBaru: totalBaru, deskripsiBaru } });
+            };
+
+            const handleHapusHutang = (orangId, hutangId) => {
+                dispatch({ type: 'HAPUS_HUTANG', payload: { orangId, hutangId } });
+            };
+
+            const handleBayarCicilan = (orangId, hutangId, jumlah, tanggalDibayar, namaPembayar, metode, nomorReferensiBank) => {
+                dispatch({ type: 'TAMBAH_CICILAN', payload: { orangId, hutangId, jumlah, tanggalDibayar, namaPembayar, metode, nomorReferensiBank } });
+            };
+
+            const openCicilModal = (orang, hutang) => {
+                setSelectedOrangForModal(orang);
+                setSelectedHutang(hutang);
+                setShowCicilModal(true);
+            };
+
+            const openEditModal = (orang, hutang) => {
+                setSelectedOrangForModal(orang);
+                setSelectedHutang(hutang);
+                setShowEditModal(true);
+            };
+
+            return (
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6">
+                        <div>
+                            <h1 className="text-3xl font-bold text-gray-800">Selamat datang, {VALID_USERNAME}!</h1>
+                            <p className="text-gray-600">Kelola keuangan Anda dengan mudah</p>
+                        </div>
+                        <div className="mt-2 sm:mt-0 bg-white px-4 py-2 rounded-lg shadow-sm">
+                            <RealTimeClock />
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col md:flex-row gap-6">
+                        <div className="w-full md:w-1/4">
+                            <Sidebar 
+                                orangList={state.orangList} 
+                                selectedOrangId={selectedOrangId} 
+                                onSelectOrang={setSelectedOrangId} 
+                                onTambahOrang={handleTambahOrang}
+                                onEditNama={handleEditNamaOrang}
+                                onHapusOrang={handleHapusOrang}
+                                activeMenu={activeMenu}
+                                setActiveMenu={setActiveMenu}
+                                dispatch={dispatch}
+                            />
+                        </div>
+
+                        <div className="flex-1">
+                            {activeMenu === 'hutang' && (
+                                <>
+                                    <RingkasanHutang orangList={state.orangList} />
+                                    {selectedOrang ? (
+                                        <DetailOrang 
+                                            orang={selectedOrang} 
+                                            dispatch={dispatch}
+                                            onTambahHutang={handleTambahHutang}
+                                            onCicil={openCicilModal}
+                                            onEditHutang={openEditModal}
+                                            onHapusHutang={handleHapusHutang}
+                                        />
+                                    ) : (
+                                        <div className="card p-8 text-center text-gray-500">
+                                            Pilih pihak dari sidebar untuk melihat detail hutang.
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                            {activeMenu === 'pengeluaran' && (
+                                <PemasukanPengeluaran state={state} dispatch={dispatch} />
+                            )}
+                        </div>
+                    </div>
+
+                    {showCicilModal && selectedOrangForModal && selectedHutang && (
+                        <ModalCicil 
+                            orang={selectedOrangForModal}
+                            hutang={selectedHutang}
+                            onClose={() => { setShowCicilModal(false); setSelectedOrangForModal(null); setSelectedHutang(null); }}
+                            onBayar={handleBayarCicilan}
+                        />
+                    )}
+
+                    {showEditModal && selectedOrangForModal && selectedHutang && (
+                        <ModalEditHutang 
+                            orang={selectedOrangForModal}
+                            hutang={selectedHutang}
+                            onClose={() => { setShowEditModal(false); setSelectedOrangForModal(null); setSelectedHutang(null); }}
+                            onEdit={handleEditHutang}
+                        />
+                    )}
+                </div>
+            );
+        }
+
+        // ==================== MODAL CICIL (dengan tampilan lebih baik) ====================
+        function ModalCicil({ orang, hutang, onClose, onBayar }) {
+            const [jumlah, setJumlah] = useState('');
+            const [namaPembayar, setNamaPembayar] = useState(VALID_USERNAME);
+            const [metode, setMetode] = useState('Langsung');
+            const [nomorReferensiBank, setNomorReferensiBank] = useState('');
+            const [tanggalBayar, setTanggalBayar] = useState(new Date().toISOString().slice(0,10));
+            const [jamBayar, setJamBayar] = useState('');
+            const [tipePembayaran, setTipePembayaran] = useState('cicil');
+            const [error, setError] = useState('');
+
+            const totalCicilan = hutang.cicilan.reduce((s, c) => s + c.jumlah, 0);
+            const sisa = hutang.totalHutang - totalCicilan;
+
+            useEffect(() => {
+                if (tipePembayaran === 'lunas') {
+                    setJumlah(sisa.toString());
+                } else {
+                    setJumlah('');
+                }
+            }, [tipePembayaran, sisa]);
+
+            const handleBayar = () => {
+                setError('');
+                const nominal = Number(jumlah);
+                if (!nominal || nominal <= 0) return setError('Masukkan nominal valid');
+                if (tipePembayaran === 'lunas' && nominal !== sisa) {
+                    return setError('Untuk pembayaran lunas, jumlah harus sama dengan sisa hutang');
+                }
+                if (tipePembayaran === 'cicil' && nominal > sisa) {
+                    return setError('Cicilan melebihi sisa hutang');
+                }
+                if (!namaPembayar.trim()) return setError('Nama pembayar harus diisi');
+                
+                if (metode === 'Transfer Bank') {
+                    if (!nomorReferensiBank.trim()) return setError('Nomor referensi bank harus diisi');
+                    if (!jamBayar) return setError('Jam pembayaran wajib diisi untuk transfer bank');
+                }
+
+                let tanggalDibayar;
+                if (jamBayar) {
+                    tanggalDibayar = new Date(tanggalBayar + 'T' + jamBayar).toISOString();
+                } else {
+                    tanggalDibayar = tanggalBayar;
+                }
+
+                onBayar(
+                    orang.id, 
+                    hutang.idHutang, 
+                    nominal, 
+                    tanggalDibayar,
+                    namaPembayar,
+                    metode,
+                    nomorReferensiBank
+                );
+                onClose();
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+                    <div className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto">
+                        <div className="flex items-center space-x-3 mb-6">
+                            <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+                                <i className="fas fa-hand-holding-usd text-2xl"></i>
+                            </div>
+                            <div>
+                                <h3 className="text-xl font-semibold text-gray-800">Pembayaran Hutang</h3>
+                                <p className="text-sm text-gray-500">{orang.nama}</p>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-3 mb-6">
+                            <div className="bg-blue-50 p-3 rounded-lg text-center">
+                                <p className="text-xs text-blue-600 font-medium">Total Hutang</p>
+                                <p className="text-lg font-bold text-blue-800">{formatCurrency(hutang.totalHutang)}</p>
+                            </div>
+                            <div className="bg-green-50 p-3 rounded-lg text-center">
+                                <p className="text-xs text-green-600 font-medium">Sudah Dibayar</p>
+                                <p className="text-lg font-bold text-green-700">{formatCurrency(totalCicilan)}</p>
+                            </div>
+                            <div className="bg-orange-50 p-3 rounded-lg text-center">
+                                <p className="text-xs text-orange-600 font-medium">Sisa Hutang</p>
+                                <p className="text-lg font-bold text-orange-700">{formatCurrency(sisa)}</p>
+                            </div>
+                        </div>
+
+                        {error && (
+                            <div className="bg-red-50 text-red-700 p-4 rounded-xl mb-4 text-sm flex items-start">
+                                <i className="fas fa-exclamation-circle mr-2 mt-0.5"></i>
+                                <span>{error}</span>
+                            </div>
+                        )}
+
+                        <div className="space-y-5">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Tipe Pembayaran</label>
+                                <div className="flex space-x-4 bg-gray-50 p-3 rounded-xl">
+                                    <label className={`flex items-center space-x-2 cursor-pointer flex-1 justify-center py-2 rounded-lg transition-colors ${tipePembayaran === 'cicil' ? 'bg-white shadow' : ''}`}>
+                                        <input 
+                                            type="radio" 
+                                            value="cicil" 
+                                            checked={tipePembayaran === 'cicil'} 
+                                            onChange={() => setTipePembayaran('cicil')} 
+                                            className="form-radio text-blue-600"
+                                        />
+                                        <span className="text-gray-700">Cicil</span>
+                                    </label>
+                                    <label className={`flex items-center space-x-2 cursor-pointer flex-1 justify-center py-2 rounded-lg transition-colors ${tipePembayaran === 'lunas' ? 'bg-white shadow' : ''}`}>
+                                        <input 
+                                            type="radio" 
+                                            value="lunas" 
+                                            checked={tipePembayaran === 'lunas'} 
+                                            onChange={() => setTipePembayaran('lunas')} 
+                                            className="form-radio text-blue-600"
+                                        />
+                                        <span className="text-gray-700">Lunas (langsung)</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Nama Pembayar</label>
+                                <div className="relative">
+                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                        <i className="fas fa-user text-gray-400"></i>
+                                    </div>
+                                    <input 
+                                        type="text" 
+                                        className="border border-gray-300 rounded-xl pl-10 p-3 w-full focus:ring-2 focus:ring-blue-500" 
+                                        value={namaPembayar} 
+                                        onChange={e => setNamaPembayar(e.target.value)} 
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Metode Pembayaran</label>
+                                <div className="relative">
+                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                        <i className="fas fa-credit-card text-gray-400"></i>
+                                    </div>
+                                    <select className="border border-gray-300 rounded-xl pl-10 p-3 w-full focus:ring-2 focus:ring-blue-500" value={metode} onChange={e => setMetode(e.target.value)}>
+                                        <option value="Langsung">Langsung</option>
+                                        <option value="Transfer Bank">Transfer Bank</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            {metode === 'Transfer Bank' && (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Nomor Referensi Bank <span className="text-red-500">*</span>
+                                    </label>
+                                    <div className="relative">
+                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                            <i className="fas fa-hashtag text-gray-400"></i>
+                                        </div>
+                                        <input 
+                                            type="text" 
+                                            className="border border-gray-300 rounded-xl pl-10 p-3 w-full focus:ring-2 focus:ring-blue-500" 
+                                            value={nomorReferensiBank} 
+                                            onChange={e => setNomorReferensiBank(e.target.value)} 
+                                            placeholder="Masukkan nomor referensi"
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Tanggal Dibayarkan</label>
+                                    <div className="relative">
+                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                            <i className="fas fa-calendar-alt text-gray-400"></i>
+                                        </div>
+                                        <input type="date" className="border border-gray-300 rounded-xl pl-10 p-3 w-full focus:ring-2 focus:ring-blue-500" value={tanggalBayar} onChange={e => setTanggalBayar(e.target.value)} />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Jam Dibayarkan
+                                        {metode === 'Transfer Bank' ? <span className="text-red-500"> *</span> : <span className="text-gray-400 text-xs ml-1">(opsional)</span>}
+                                    </label>
+                                    <div className="relative">
+                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                            <i className="fas fa-clock text-gray-400"></i>
+                                        </div>
+                                        <input type="time" className="border border-gray-300 rounded-xl pl-10 p-3 w-full focus:ring-2 focus:ring-blue-500" value={jamBayar} onChange={e => setJamBayar(e.target.value)} />
+                                    </div>
+                                    {metode === 'Langsung' && <p className="text-xs text-gray-400 mt-1">Kosongkan jika tidak perlu</p>}
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Jumlah {tipePembayaran === 'lunas' ? '(Lunas)' : 'Cicilan'}
+                                </label>
+                                <div className="relative">
+                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                        <i className="fas fa-money-bill-wave text-gray-400"></i>
+                                    </div>
+                                    <input 
+                                        type="number" 
+                                        className="border border-gray-300 rounded-xl pl-10 p-3 w-full focus:ring-2 focus:ring-blue-500" 
+                                        placeholder="Masukkan jumlah" 
+                                        value={jumlah} 
+                                        onChange={e => setJumlah(e.target.value)} 
+                                        disabled={tipePembayaran === 'lunas'} 
+                                    />
+                                </div>
+                                {tipePembayaran === 'lunas' && (
+                                    <p className="text-xs text-blue-500 mt-1 flex items-center">
+                                        <i className="fas fa-info-circle mr-1"></i>
+                                        Jumlah otomatis diisi sesuai sisa hutang
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end space-x-3 mt-8">
+                            <button onClick={onClose} className="btn-secondary px-6 py-3">
+                                Batal
+                            </button>
+                            <button onClick={handleBayar} className="btn-primary px-6 py-3 flex items-center">
+                                <i className="fas fa-check mr-2"></i>Bayar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ==================== MODAL EDIT HUTANG ====================
+        function ModalEditHutang({ orang, hutang, onClose, onEdit }) {
+            const [totalBaru, setTotalBaru] = useState(hutang.totalHutang);
+            const [deskripsiBaru, setDeskripsiBaru] = useState(hutang.deskripsi || '');
+            const totalCicilan = hutang.cicilan.reduce((s, c) => s + c.jumlah, 0);
+
+            const handleUpdate = () => {
+                const baru = Number(totalBaru);
+                if (baru < totalCicilan) {
+                    return alert('Total hutang baru tidak boleh kurang dari total cicilan');
+                }
+                onEdit(orang.id, hutang.idHutang, baru, deskripsiBaru);
+                onClose();
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+                        <h3 className="text-xl font-semibold mb-4">Edit Hutang - {orang.nama}</h3>
+                        <p className="mb-2 text-sm">Total Cicilan Sudah Dibayar: {formatCurrency(totalCicilan)}</p>
+                        <input type="number" className="border rounded-lg p-3 w-full mb-3" value={totalBaru} onChange={e => setTotalBaru(e.target.value)} placeholder="Total Hutang" />
+                        <input type="text" className="border rounded-lg p-3 w-full mb-4" value={deskripsiBaru} onChange={e => setDeskripsiBaru(e.target.value)} placeholder="Deskripsi" />
+                        <div className="flex justify-end space-x-2">
+                            <button onClick={onClose} className="btn-secondary">Batal</button>
+                            <button onClick={handleUpdate} className="btn-primary">Simpan</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ==================== APP UTAMA ====================
+        function App() {
+            const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+            useEffect(() => {
+                const session = localStorage.getItem('skyledger_session');
+                if (session === 'true') setIsLoggedIn(true);
+            }, []);
+
+            const handleLogin = () => {
+                setIsLoggedIn(true);
+                localStorage.setItem('skyledger_session', 'true');
+            };
+
+            const handleLogout = () => {
+                setIsLoggedIn(false);
+                localStorage.removeItem('skyledger_session');
+            };
+
+            return (
+                <div>
+                    {!isLoggedIn ? (
+                        <Login onLogin={handleLogin} />
+                    ) : (
+                        <div>
+                            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-end">
+                                <button onClick={handleLogout} className="btn-secondary text-sm">
+                                    <i className="fas fa-sign-out-alt mr-2"></i>Logout
+                                </button>
+                            </div>
+                            <Dashboard />
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
